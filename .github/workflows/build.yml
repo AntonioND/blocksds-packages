@@ -20,6 +20,7 @@ permissions:
 jobs:
   build_linux:
     name: Build Pacman packages (Linux)
+    if: false # Disable this for now
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -100,6 +101,33 @@ jobs:
         with:
           name: Pacman packages (Linux, ${{ matrix.arch }})
           path: ${{ github.workspace }}/*/*.pkg.tar.xz
+
+  get_fedora_releases:
+    name: Get Fedora Releases
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query Fedora
+        id: releases
+        uses: sgallagher/get-fedora-releases-action@v1
+    outputs:
+      stable: ${{ steps.releases.outputs.stable }}
+
+  build_windows:
+    name: Unit Tests (Stable Fedora)
+    needs: get_fedora_releases
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64]
+        release: ${{ fromJson(needs.get_fedora_releases.outputs.stable) }}
+    container:
+      image: quay.io/fedora/fedora:${{ matrix.release }}-x86_64
+
+    steps:
+      - name: Run the tests
+        run: echo "running tests"
 
   generate_website:
     name: Generate website
