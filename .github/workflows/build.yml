@@ -78,8 +78,6 @@ jobs:
           export BLOCKSDS=/opt/wonderful/thirdparty/blocksds/core/
           export BLOCKSDSEXT=/opt/wonderful/thirdparty/blocksds/external/
 
-          export arch=${{ matrix.arch }}
-
           # FIXME: The first launch of fakeroot via wf-makepkg seems to emit a
           # SIGUSR1 in this environment. Thankfully, executing it again picks
           # up right where it left off.
@@ -102,32 +100,62 @@ jobs:
           name: Pacman packages (Linux, ${{ matrix.arch }})
           path: ${{ github.workspace }}/*/*.pkg.tar.xz
 
-  get_fedora_releases:
-    name: Get Fedora Releases
-    runs-on: ubuntu-latest
-    steps:
-      - name: Query Fedora
-        id: releases
-        uses: sgallagher/get-fedora-releases-action@v1
-    outputs:
-      stable: ${{ steps.releases.outputs.stable }}
-
+  # Using Windows to generate the packages is a bit problematic because the
+  # Wonderful Toolchain installer is a GUI application, and because the
+  # Wonderful Toolchain Shell needs to be used to build anything that uses the
+  # toolchain. Instead of using Windwows, we cross-compile in Fedora.
   build_windows:
-    name: Unit Tests (Stable Fedora)
-    needs: get_fedora_releases
+    name: Build Pacman packages (Windows)
     runs-on: ubuntu-latest
     continue-on-error: false
     strategy:
       fail-fast: false
-      matrix:
-        arch: [x86_64]
-        release: ${{ fromJson(needs.get_fedora_releases.outputs.stable) }}
     container:
-      image: quay.io/fedora/fedora:${{ matrix.release }}-x86_64
+      image: quay.io/fedora/fedora:41-x86_64
 
     steps:
+      - name: Install dependencies
+        run: sudo dnf install -y fakeroot git patchelf
+        # build-base libarchive-tools
+
       - name: Run the tests
-        run: echo "running tests"
+        run: whoami || pwd
+
+      # This folder needs to be created as root, but regular users need to be
+      # able to modify it.
+      - name: Create /opt/wonderful folder
+        run: |
+          sudo mkdir /opt/wonderful
+          sudo chown -R $USER /opt/wonderful
+
+      - name: Install Wonderful
+        run: |
+          cd /opt/wonderful
+          curl https://wonderful.asie.pl/bootstrap/wf-bootstrap-${{ matrix.arch }}.tar.gz | tar xzvf -
+
+      - name: Install prerequisites (Wonderful)
+        run: |
+          export PATH=/opt/wonderful/bin:$PATH
+
+          wf-pacman -Syu --noconfirm wonderful-base runtime-musl-dev
+
+      - name: Build packages
+        run: |
+          export PATH=/opt/wonderful/bin:$PATH
+          export BLOCKSDS=/opt/wonderful/thirdparty/blocksds/core/
+          export BLOCKSDSEXT=/opt/wonderful/thirdparty/blocksds/external/
+
+          # FIXME: The first launch of fakeroot via wf-makepkg seems to emit a
+          # SIGUSR1 in this environment. Thankfully, executing it again picks
+          # up right where it left off.
+          bash ./build.sh --retry blocksds-toolchain
+          bash ./install.sh blocksds-toolchain
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pacman packages (Windows, x86_64)
+          path: ${{ github.workspace }}/*/*.pkg.tar.xz
 
   generate_website:
     name: Generate website
