@@ -67,14 +67,11 @@ jobs:
 
       - name: Install prerequisites (Wonderful)
         run: |
-          export PATH=/opt/wonderful/bin:$PATH
-
-          wf-pacman -Syu --noconfirm wonderful-base runtime-musl-dev
+          /opt/wonderful/bin/wf-pacman -Syu --noconfirm wonderful-base runtime-musl-dev
         shell: alpine.sh {0}
 
       - name: Build packages
         run: |
-          export PATH=/opt/wonderful/bin:$PATH
           export BLOCKSDS=/opt/wonderful/thirdparty/blocksds/core/
           export BLOCKSDSEXT=/opt/wonderful/thirdparty/blocksds/external/
 
@@ -114,42 +111,56 @@ jobs:
       image: quay.io/fedora/fedora:41-x86_64
 
     steps:
+      - name: Clone project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Install dependencies
-        run: sudo dnf install -y fakeroot git patchelf
+        run: sudo dnf install -y fakeroot git patchelf make mingw64-gcc mingw64-gcc-c++ mingw64-win-iconv
         # build-base libarchive-tools
 
-      - name: Run the tests
-        run: whoami || pwd
+      # fakeroot is required to build packages, but it can't be run as root.
+      # This will create a new user called "runner".
+      - name: Create a new user
+        run: |
+          useradd runner
 
       # This folder needs to be created as root, but regular users need to be
       # able to modify it.
       - name: Create /opt/wonderful folder
         run: |
-          sudo mkdir /opt/wonderful
-          sudo chown -R $USER /opt/wonderful
+          mkdir /opt/wonderful
+          chown -R runner /opt/wonderful
 
       - name: Install Wonderful
         run: |
           cd /opt/wonderful
-          curl https://wonderful.asie.pl/bootstrap/wf-bootstrap-${{ matrix.arch }}.tar.gz | tar xzvf -
+          sudo -u runner -- curl https://wonderful.asie.pl/bootstrap/wf-bootstrap-x86_64.tar.gz -o wf-bootstrap-x86_64.tar.gz
+          sudo -u runner -- tar xzvf wf-bootstrap-x86_64.tar.gz
 
       - name: Install prerequisites (Wonderful)
         run: |
-          export PATH=/opt/wonderful/bin:$PATH
-
-          wf-pacman -Syu --noconfirm wonderful-base runtime-musl-dev
+          sudo -u runner -E -- /opt/wonderful/bin/wf-pacman -Syu --noconfirm wonderful-base runtime-musl-dev toolchain-gcc-arm-none-eabi toolchain-gcc-arm-none-eabi toolchain-llvm-teak-llvm
 
       - name: Build packages
         run: |
-          export PATH=/opt/wonderful/bin:$PATH
           export BLOCKSDS=/opt/wonderful/thirdparty/blocksds/core/
           export BLOCKSDSEXT=/opt/wonderful/thirdparty/blocksds/external/
+
+          export HOSTCXX=x86_64-w64-mingw32-g++
+          export HOSTCC=x86_64-w64-mingw32-gcc
+
+          chown -R runner .
 
           # FIXME: The first launch of fakeroot via wf-makepkg seems to emit a
           # SIGUSR1 in this environment. Thankfully, executing it again picks
           # up right where it left off.
-          bash ./build.sh --retry blocksds-toolchain
-          bash ./install.sh blocksds-toolchain
+
+          sudo -u runner -E -- bash ./build.sh --retry blocksds-toolchain
+          sudo -u runner -E -- bash ./install.sh blocksds-toolchain
+
+          tree
 
       - name: Archive artifacts
         uses: actions/upload-artifact@v4
@@ -211,8 +222,6 @@ jobs:
 
       - name: Create repo files
         run: |
-          export PATH=/opt/wonderful/bin:$PATH
-
           tree
 
           mkdir repo
@@ -226,7 +235,7 @@ jobs:
 
           #tree
 
-          wf-repo-add blocksds.db.tar.xz *.pkg.tar.xz
+          /opt/wonderful/bin/wf-repo-add blocksds.db.tar.xz *.pkg.tar.xz
 
           tree
 
