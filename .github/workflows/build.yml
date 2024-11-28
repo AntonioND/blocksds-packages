@@ -97,76 +97,123 @@ jobs:
           name: Pacman packages (Linux, ${{ matrix.arch }})
           path: ${{ github.workspace }}/*/*.pkg.tar.xz
 
-  # Using Windows to generate the packages is a bit problematic because the
-  # Wonderful Toolchain installer is a GUI application, and because the
-  # Wonderful Toolchain Shell needs to be used to build anything that uses the
-  # toolchain. Instead of using Windwows, we cross-compile in Fedora.
+  # https://wonderful.asie.pl/wiki/doku.php?id=getting_started
   build_windows:
     name: Build Pacman packages (Windows)
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     continue-on-error: false
     strategy:
       fail-fast: false
-    container:
-      image: quay.io/fedora/fedora:41-x86_64
-
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
-      - name: Clone project
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+      - uses: msys2/setup-msys2@v2
         with:
-          fetch-depth: 0
+          msystem: ucrt64
+          update: true
+          install: |
+            base-devel
+            gcc
+            git
+            libarchive
+            libtool
+            lld
+            make
+            mingw-w64-ucrt-x86_64-ca-certificates
+            mingw-w64-ucrt-x86_64-iconv
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-poetry
+            mingw-w64-ucrt-x86_64-toolchain
+            wget
 
-      - name: Install dependencies
-        run: sudo dnf install -y fakeroot git patchelf make mingw64-gcc mingw64-gcc-c++ mingw64-win-iconv
-        # build-base libarchive-tools
-
-      # fakeroot is required to build packages, but it can't be run as root.
-      # This will create a new user called "runner".
-      - name: Create a new user
+      - name: CI-Build
         run: |
-          useradd runner
+          echo 'Running in MSYS2!'
 
-      # This folder needs to be created as root, but regular users need to be
-      # able to modify it.
-      - name: Create /opt/wonderful folder
-        run: |
           mkdir /opt/wonderful
-          chown -R runner /opt/wonderful
-
-      - name: Install Wonderful
-        run: |
           cd /opt/wonderful
-          sudo -u runner -- curl https://wonderful.asie.pl/bootstrap/wf-bootstrap-x86_64.tar.gz -o wf-bootstrap-x86_64.tar.gz
-          sudo -u runner -- tar xzvf wf-bootstrap-x86_64.tar.gz
 
-      - name: Install prerequisites (Wonderful)
-        run: |
-          sudo -u runner -E -- /opt/wonderful/bin/wf-pacman -Syu --noconfirm wonderful-base runtime-musl-dev toolchain-gcc-arm-none-eabi toolchain-gcc-arm-none-eabi toolchain-llvm-teak-llvm
+          wget https://wonderful.asie.pl/bootstrap/wf-bootstrap-windows-x86_64.tar.gz
+          tar -xzvf wf-bootstrap-windows-x86_64.tar.gz
 
-      - name: Build packages
-        run: |
-          export BLOCKSDS=/opt/wonderful/thirdparty/blocksds/core/
-          export BLOCKSDSEXT=/opt/wonderful/thirdparty/blocksds/external/
+          wget https://raw.githubusercontent.com/WonderfulToolchain/wonderful-packages/refs/heads/main/misc/windows/makepkg.conf
+          mv makepkg.conf /etc/makepkg.conf
 
-          export HOSTCXX=x86_64-w64-mingw32-g++
-          export HOSTCC=x86_64-w64-mingw32-gcc
+          export PATH=/opt/wonderful/bin:$PATH
+          export WONDERFUL_TOOLCHAIN=/opt/wonderful
 
-          chown -R runner .
+          wf-pacman -Syu --noconfirm
+          wf-pacman -Syu --noconfirm wonderful-base toolchain-gcc-arm-none-eabi
 
-          # FIXME: The first launch of fakeroot via wf-makepkg seems to emit a
-          # SIGUSR1 in this environment. Thankfully, executing it again picks
-          # up right where it left off.
+          echo "Repository: ${GITHUB_REPOSITORY}"
+          git clone https://github.com/${GITHUB_REPOSITORY}
+          cd blocksds-packages
 
-          sudo -u runner -E -- bash ./build.sh --retry blocksds-toolchain
-          sudo -u runner -E -- bash ./install.sh blocksds-toolchain
+          ./build.sh blocksds-toolchain
 
-          tree
+          #x86_64-w64-mingw32-gcc --version
+          #ar --version
+          #
+          #
+#   steps:
+#     - name: Clone project
+#       uses: actions/checkout@v4
+#       with:
+#         fetch-depth: 0
 
-      - name: Archive artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Pacman packages (Windows, x86_64)
-          path: ${{ github.workspace }}/*/*.pkg.tar.xz
+#     - name: Install dependencies
+#       run: sudo dnf install -y fakeroot git patchelf make mingw64-gcc mingw64-gcc-c++ mingw64-win-iconv
+#       # build-base libarchive-tools
+
+#     # fakeroot is required to build packages, but it can't be run as root.
+#     # This will create a new user called "runner".
+#     - name: Create a new user
+#       run: |
+#         useradd runner
+
+#     # This folder needs to be created as root, but regular users need to be
+#     # able to modify it.
+#     - name: Create /opt/wonderful folder
+#       run: |
+#         mkdir /opt/wonderful
+#         chown -R runner /opt/wonderful
+
+#     - name: Install Wonderful
+#       run: |
+#         cd /opt/wonderful
+#         sudo -u runner -- curl https://wonderful.asie.pl/bootstrap/wf-bootstrap-x86_64.tar.gz -o wf-bootstrap-x86_64.tar.gz
+#         sudo -u runner -- tar xzvf wf-bootstrap-x86_64.tar.gz
+
+#     - name: Install prerequisites (Wonderful)
+#       run: |
+#         sudo -u runner -E -- /opt/wonderful/bin/wf-pacman -Syu --noconfirm wonderful-base runtime-musl-dev toolchain-gcc-arm-none-eabi toolchain-gcc-arm-none-eabi toolchain-llvm-teak-llvm
+
+#     - name: Build packages
+#       run: |
+#         export BLOCKSDS=/opt/wonderful/thirdparty/blocksds/core/
+#         export BLOCKSDSEXT=/opt/wonderful/thirdparty/blocksds/external/
+
+#         export HOSTCXX=x86_64-w64-mingw32-g++
+#         export HOSTCC=x86_64-w64-mingw32-gcc
+
+#         chown -R runner .
+
+#         # FIXME: The first launch of fakeroot via wf-makepkg seems to emit a
+#         # SIGUSR1 in this environment. Thankfully, executing it again picks
+#         # up right where it left off.
+
+#         sudo -u runner -E -- bash ./build.sh --retry blocksds-toolchain
+#         sudo -u runner -E -- bash ./install.sh blocksds-toolchain
+
+#         tree
+
+#     - name: Archive artifacts
+#       uses: actions/upload-artifact@v4
+#       with:
+#         name: Pacman packages (Windows, x86_64)
+#         path: ${{ github.workspace }}/*/*.pkg.tar.xz
 
   generate_website:
     name: Generate website
